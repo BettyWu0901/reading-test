@@ -252,10 +252,10 @@ elif st.session_state.step == 'confirm':
     
     if st.button("🚀 進入錢天堂 (開始測驗)"):
         ani_box = st.empty()
-        ani_box.image("https://media.giphy.com/media/l1KtXm1qo1d3f5FzW/giphy.gif", caption="正全速前往錢天堂...", width=300)
+        ani_box.image("https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif", caption="招財貓正在努力製作你的考卷...", width=300)
         
-        with st.status("🧙‍♀️ 正在準備考卷...", expanded=True) as status:
-            st.write("📖 閱讀故事中...")
+        with st.status("🧙‍♀️ 紅子老闆娘收到訂單了...", expanded=True) as status:
+            st.write("📖 正在閱讀《神奇柑仔店》的故事內容...")
             time.sleep(1)
             st.write("😼 召喚招財貓出題...")
             story = load_story()
@@ -433,3 +433,4 @@ elif st.session_state.step == 'finished':
     if st.button("🔄 重新挑戰"):
         for k in list(st.session_state.keys()): del st.session_state[k]
         st.rerun()
+
