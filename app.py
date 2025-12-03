@@ -27,9 +27,10 @@ except Exception as e:
     ai_status_msg = f"❌ 錯誤: {str(e)}"
 
 # ==========================================
-# 2. AI 核心功能區 (含自動修復機制 + 規則題數)
+# 2. AI 核心功能區
 # ==========================================
 
+# 安全設定：防止 AI 被鬼故事內容嚇到而拒絕出題
 safety_settings = [
     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
     {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -47,9 +48,7 @@ def get_mock_quiz():
 
 # --- 強力 JSON 解析器 (防止 AI 廢話導致錯誤) ---
 def extract_json(text):
-    """
-    不管 AI 回傳什麼，嘗試從中抓出 JSON 物件。
-    """
+    """嘗試從 AI 回傳的文字中抓出 JSON 物件"""
     try:
         # 1. 嘗試直接解析
         return json.loads(text)
@@ -72,25 +71,25 @@ def call_ai_generate_quiz(level, text_content):
     
     # --- 依照《閱讀認證規則.txt》設定嚴格規則 ---
     if level == "A":
-        # A級: 問答1題，選擇10題(提取2/推論4/詮釋4)
+        # A級: 問答1題，選擇10題 (共11題)
         rule = """
-        【等級A規則 (一般)】：
+        【等級A (一般) 規則】：
         1. 問答題：出 1 題 (每題20分)。
-        2. 選擇題：出 10 題 (每題8分)。需包含：提取訊息2題、推論訊息4題、詮釋整合4題。
+        2. 選擇題：出 10 題 (每題8分)。包含：提取訊息2題、推論訊息4題、詮釋整合4題。
         """
     elif level == "B":
-        # B級: 問答2題，選擇10題(提取1/推論3/詮釋6)
+        # B級: 問答2題，選擇10題 (共12題)
         rule = """
-        【等級B規則 (精熟)】：
+        【等級B (精熟) 規則】：
         1. 問答題：出 2 題 (每題20分)。
-        2. 選擇題：出 10 題 (每題6分)。需包含：提取訊息1題、推論訊息3題、詮釋整合6題。
+        2. 選擇題：出 10 題 (每題6分)。包含：提取訊息1題、推論訊息3題、詮釋整合6題。
         """
     else:
-        # C級: 問答3題，選擇10題(推論3/詮釋7)
+        # C級: 問答3題，選擇10題 (共13題)
         rule = """
-        【等級C規則 (深刻)】：
+        【等級C (深刻) 規則】：
         1. 問答題：出 3 題 (每題20分)。
-        2. 選擇題：出 10 題 (每題4分)。需包含：推論訊息3題、詮釋整合7題。
+        2. 選擇題：出 10 題 (每題4分)。包含：推論訊息3題、詮釋整合7題。
         """
 
     prompt = f"""
@@ -112,27 +111,22 @@ def call_ai_generate_quiz(level, text_content):
     }}
     """
     
-    # --- 雙重模型嘗試機制 (斷線救星) ---
-    # 先試 gemini-2.5-flash (你帳號專屬)，失敗試 gemini-1.5-flash (通用)
-    models_to_try = ['gemini-2.5-flash', 'gemini-1.5-flash']
-    
-    for model_name in models_to_try:
-        try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt, safety_settings=safety_settings)
+    # --- 使用你帳號唯一可用的模型 ---
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = model.generate_content(prompt, safety_settings=safety_settings)
+        
+        # 使用強力解析器
+        data = extract_json(response.text)
+        if data:
+            return data
+        else:
+            st.sidebar.error("⚠️ AI 回傳格式錯誤，無法解析題目。")
+            return get_mock_quiz()
             
-            # 使用強力解析器
-            data = extract_json(response.text)
-            if data:
-                return data
-            # 如果回傳是空的或格式爛掉，就讓迴圈繼續跑下一個模型
-                
-        except Exception:
-            continue # 試下一個模型
-
-    # 如果全部都失敗，才回傳備用題庫
-    st.sidebar.error("⚠️ AI 忙碌中，已切換至備用題庫模式。")
-    return get_mock_quiz()
+    except Exception as e:
+        st.sidebar.error(f"⚠️ AI 連線發生錯誤: {e}")
+        return get_mock_quiz()
 
 def call_ai_generate_hint(question, wrong_answer, correct_option_index, options, story_text):
     if not ai_available: return "請再讀一次故事喔！"
@@ -148,7 +142,8 @@ def call_ai_generate_hint(question, wrong_answer, correct_option_index, options,
     【原則】：不直接給答案，用引導的方式。30字以內。
     """
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash') # 用輕量模型跑小任務
+        # 提示可以用輕量模型，比較快
+        model = genai.GenerativeModel('gemini-2.5-flash') 
         response = model.generate_content(prompt, safety_settings=safety_settings)
         return response.text.strip()
     except:
@@ -166,7 +161,7 @@ def call_ai_grade_qa(question, student_answer, story_text):
     格式：分數|評語
     """
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt, safety_settings=safety_settings)
         text = response.text.strip()
         if "|" in text:
@@ -179,18 +174,22 @@ def call_ai_grade_qa(question, student_answer, story_text):
 def call_ai_final_comment(total, level, story_text):
     if not ai_available: return "測驗完成！"
     
-    # 根據圖片中的風格進行優化
+    # 根據圖片中的風格進行優化：溫暖、鼓勵、具體
     prompt = f"""
-    學生在閱讀測驗中獲得了 {total} 分。
-    請給予一句「繁體中文」的鼓勵語句，風格要溫暖、正向，肯定學生的努力。
-    參考句型：「恭喜你獲得了...這真是太棒了，證明了你的努力和實力！繼續保持這份優秀！」
-    不需要太長，約 50 字左右。
+    你是一位溫暖的老師。學生在閱讀測驗中獲得了 {total} 分 (滿分100)。
+    請寫一段繁體中文的評語。
+    
+    【風格要求】：
+    1. **高度肯定**：用「恭喜你」、「太棒了」開頭。
+    2. **強調特質**：稱讚學生的「努力」、「實力」或「熱情」。
+    3. **正向鼓勵**：鼓勵他繼續保持或發光發熱。
+    4. 不要使用條列式，請寫成一段溫暖的話，約 50-80 字。
     """
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash')
         return model.generate_content(prompt, safety_settings=safety_settings).text.strip()
     except:
-        return "測驗結束，你做得很好！"
+        return "測驗結束，你做得很好！繼續加油！"
 
 # ==========================================
 # 3. 介面與流程
@@ -252,7 +251,6 @@ elif st.session_state.step == 'confirm':
     st.write("準備好接受紅子老闆娘的考驗了嗎？")
     
     if st.button("🚀 進入錢天堂 (開始測驗)"):
-        # 馬利歐動畫
         ani_box = st.empty()
         ani_box.image("https://media.giphy.com/media/l1KtXm1qo1d3f5FzW/giphy.gif", caption="正全速前往錢天堂...", width=300)
         
@@ -281,7 +279,7 @@ elif st.session_state.step == 'confirm':
             st.session_state.step = 'testing'
             st.rerun()
         else:
-            st.error("出題失敗，請重試或檢查 API。")
+            st.error("出題失敗，請檢查側邊欄錯誤訊息。")
 
 elif st.session_state.step == 'testing':
     total_q = len(st.session_state.all_questions)
@@ -366,7 +364,7 @@ elif st.session_state.step == 'calculating':
                 
                 if is_correct:
                     pts = mc_score_per_q
-                    feedback = "✅ 答對了！"
+                    feedback = "✅ 答對了！紅子老闆娘覺得你很有眼光！"
                 else:
                     st.write(f"正在分析選擇題錯誤：{ans['question'][:10]}...")
                     feedback = call_ai_generate_hint(
