@@ -1,4 +1,3 @@
-%%writefile app.py
 import streamlit as st
 import pandas as pd
 import datetime
@@ -213,4 +212,5 @@ elif st.session_state.step == 'finished':
     st.markdown("---")
     if st.button("重新開始"):
         for key in list(st.session_state.keys()): del st.session_state[key]
+
         st.rerun()
