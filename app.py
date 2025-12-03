@@ -4,7 +4,7 @@ import datetime
 import os
 import json
 import time
-import re  # 匯入強力文字處理工具
+import re
 
 # ==========================================
 # 1. AI 設定與診斷區
@@ -27,10 +27,9 @@ except Exception as e:
     ai_status_msg = f"❌ 錯誤: {str(e)}"
 
 # ==========================================
-# 2. AI 核心功能區
+# 2. AI 核心功能區 (穩定版)
 # ==========================================
 
-# 安全設定：防止 AI 被鬼故事內容嚇到而拒絕出題
 safety_settings = [
     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
     {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -46,77 +45,47 @@ def get_mock_quiz():
         ]
     }
 
-# --- 強力 JSON 解析器 (防止 AI 廢話導致錯誤) ---
 def extract_json(text):
-    """嘗試從 AI 回傳的文字中抓出 JSON 物件"""
     try:
-        # 1. 嘗試直接解析
         return json.loads(text)
     except:
         pass
-    
     try:
-        # 2. 使用正則表達式抓取第一個 { 到 最後一個 }
         match = re.search(r'\{.*\}', text, re.DOTALL)
         if match:
             json_str = match.group()
             return json.loads(json_str)
     except:
         pass
-        
     return None
 
 def call_ai_generate_quiz(level, text_content):
     if not ai_available: return get_mock_quiz()
     
-    # --- 依照《閱讀認證規則.txt》設定嚴格規則 ---
     if level == "A":
-        # A級: 問答1題，選擇10題 (共11題)
-        rule = """
-        【等級A (一般) 規則】：
-        1. 問答題：出 1 題 (每題20分)。
-        2. 選擇題：出 10 題 (每題8分)。包含：提取訊息2題、推論訊息4題、詮釋整合4題。
-        """
+        rule = """【等級A (一般) 規則】：1. 問答題 1 題 (20分)。2. 選擇題 10 題 (8分)。包含：提取訊息2題、推論訊息4題、詮釋整合4題。"""
     elif level == "B":
-        # B級: 問答2題，選擇10題 (共12題)
-        rule = """
-        【等級B (精熟) 規則】：
-        1. 問答題：出 2 題 (每題20分)。
-        2. 選擇題：出 10 題 (每題6分)。包含：提取訊息1題、推論訊息3題、詮釋整合6題。
-        """
+        rule = """【等級B (精熟) 規則】：1. 問答題 2 題 (20分)。2. 選擇題 10 題 (6分)。包含：提取訊息1題、推論訊息3題、詮釋整合6題。"""
     else:
-        # C級: 問答3題，選擇10題 (共13題)
-        rule = """
-        【等級C (深刻) 規則】：
-        1. 問答題：出 3 題 (每題20分)。
-        2. 選擇題：出 10 題 (每題4分)。包含：推論訊息3題、詮釋整合7題。
-        """
+        rule = """【等級C (深刻) 規則】：1. 問答題 3 題 (20分)。2. 選擇題 10 題 (4分)。包含：推論訊息3題、詮釋整合7題。"""
 
     prompt = f"""
-    請你根據以下《神奇柑仔店》的故事內容，為國小學生設計一份「閱讀認證測驗」。
+    請你根據以下故事內容，為國小學生設計一份「閱讀認證測驗」。
     【文章內容】：{text_content[:30000]} 
     
     【重要出題規則】：
     {rule}
-    3. **題目順序**：JSON 中請包含 `qa_questions` (問答) 和 `mc_questions` (選擇)。
-    4. **選擇題選項**：每題必須有 **6 個選項** (1~6)，且要有合理的誘答性。
-    5. **題目焦點**：針對故事劇情、角色行為、寓意提問。嚴禁問教育學或評估文章的問題。
-    6. **語言**：繁體中文。
+    3. **語言**：全程使用繁體中文。
+    4. **選擇題選項**：每題必須有 6 個選項 (1~6)。
+    5. **題目焦點**：針對故事劇情、角色行為、寓意提問。嚴禁問評估文章的問題。
 
     【格式要求】：請回傳純 JSON 格式。
-    JSON 結構範例：
-    {{
-        "qa_questions": [{{"id": 1, "question": "...", "score": 20}}],
-        "mc_questions": [{{"id": 1, "type": "...", "question": "...", "options": ["1. A", "2. B", "3. C", "4. D", "5. E", "6. F"], "answer": "2"}}]
-    }}
     """
     
-    # --- 使用你帳號唯一可用的模型 ---
     try:
+        # 使用你帳號唯一可用的 gemini-2.5-flash
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt, safety_settings=safety_settings)
-        
-        # 使用強力解析器
         data = extract_json(response.text)
         if data:
             return data
@@ -136,14 +105,13 @@ def call_ai_generate_hint(question, wrong_answer, correct_option_index, options,
         correct_answer_text = "正確答案"
     
     prompt = f"""
-    學生答錯了。請扮演紅子老闆娘給予提示。
+    請扮演紅子老闆娘給予提示。
     【題目】：{question}
     【正確答案】：{correct_answer_text}
-    【原則】：不直接給答案，用引導的方式。30字以內。
+    【原則】：不直接給答案，用引導的方式。**請用繁體中文回覆，嚴禁使用日文。** 30字以內。
     """
     try:
-        # 提示可以用輕量模型，比較快
-        model = genai.GenerativeModel('gemini-2.5-flash') 
+        model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt, safety_settings=safety_settings)
         return response.text.strip()
     except:
@@ -153,41 +121,43 @@ def call_ai_grade_qa(question, student_answer, story_text):
     if not ai_available: return 10, "AI 未連線。"
     
     prompt = f"""
-    請扮演《神奇柑仔店》紅子老闆娘批改問答題。
+    請扮演《神奇柑仔店》的紅子老闆娘批改問答題。
     【題目】：{question}
     【回答】：{student_answer}
-    【標準】：滿分20分。依據：1.了解題意 2.內容正確合理 3.有獨特見解。
-    【回饋】：若錯請引導，若對請稱讚。語氣神秘溫暖。
+    【評分標準】：滿分20分。依據：1.了解題意 2.內容正確 3.有獨特見解。
+    【回饋原則】：若錯請引導，若對請稱讚。**請用繁體中文回覆，嚴禁使用日文。**
     格式：分數|評語
     """
     try:
+        # --- 雙重檢查確保格式正確 ---
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt, safety_settings=safety_settings)
         text = response.text.strip()
+        
         if "|" in text:
             s, f = text.split("|", 1)
-            return int(float(s)), f
-        return 10, text
-    except:
-        return 10, "評分系統忙碌中。"
+            # 確保分數是數字
+            if s.strip().isdigit():
+                return int(s.strip()), f.strip()
+        
+        # 如果格式不符或 AI 忙碌，給予通用回饋
+        return 10, "評分系統忙碌中。 (已獲取部分分數)"
+    except Exception:
+        # 如果連線失敗，回傳預設分數
+        return 10, "評分系統連線失敗，請重試。"
 
 def call_ai_final_comment(total, level, story_text):
     if not ai_available: return "測驗完成！"
     
-    # 根據圖片中的風格進行優化：溫暖、鼓勵、具體
+    # 這裡確保了你喜歡的溫暖鼓勵風格
     prompt = f"""
     你是一位溫暖的老師。學生在閱讀測驗中獲得了 {total} 分 (滿分100)。
-    請寫一段繁體中文的評語。
-    
-    【風格要求】：
-    1. **高度肯定**：用「恭喜你」、「太棒了」開頭。
-    2. **強調特質**：稱讚學生的「努力」、「實力」或「熱情」。
-    3. **正向鼓勵**：鼓勵他繼續保持或發光發熱。
-    4. 不要使用條列式，請寫成一段溫暖的話，約 50-80 字。
+    請給予一句簡短、溫暖的繁體中文評語，肯定學生的努力和實力。**嚴禁使用日文。**
     """
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
-        return model.generate_content(prompt, safety_settings=safety_settings).text.strip()
+        response = model.generate_content(prompt, safety_settings=safety_settings)
+        return response.text.strip()
     except:
         return "測驗結束，你做得很好！繼續加油！"
 
@@ -252,10 +222,10 @@ elif st.session_state.step == 'confirm':
     
     if st.button("🚀 進入錢天堂 (開始測驗)"):
         ani_box = st.empty()
-        ani_box.image("https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif", caption="招財貓正在努力製作你的考卷...", width=300)
+        ani_box.image("https://media.giphy.com/media/l1KtXm1qo1d3f5FzW/giphy.gif", caption="正全速前往錢天堂...", width=300)
         
-        with st.status("🧙‍♀️ 紅子老闆娘收到訂單了...", expanded=True) as status:
-            st.write("📖 正在閱讀《神奇柑仔店》的故事內容...")
+        with st.status("🧙‍♀️ 正在準備考卷...", expanded=True) as status:
+            st.write("📖 閱讀故事中...")
             time.sleep(1)
             st.write("😼 召喚招財貓出題...")
             story = load_story()
@@ -279,7 +249,7 @@ elif st.session_state.step == 'confirm':
             st.session_state.step = 'testing'
             st.rerun()
         else:
-            st.error("出題失敗，請檢查側邊欄錯誤訊息。")
+            st.error("出題失敗，請重試或檢查側邊欄錯誤訊息。")
 
 elif st.session_state.step == 'testing':
     total_q = len(st.session_state.all_questions)
@@ -343,7 +313,6 @@ elif st.session_state.step == 'calculating':
         total = 0
         story = load_story()
         
-        # 依照規則設定選擇題配分
         mc_score_per_q = 0
         if st.session_state.level == "A": mc_score_per_q = 8
         elif st.session_state.level == "B": mc_score_per_q = 6
@@ -433,4 +402,3 @@ elif st.session_state.step == 'finished':
     if st.button("🔄 重新挑戰"):
         for k in list(st.session_state.keys()): del st.session_state[k]
         st.rerun()
-
