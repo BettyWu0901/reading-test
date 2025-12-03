@@ -269,7 +269,7 @@ elif st.session_state.step == 'confirm':
     if st.button("🚀 進入錢天堂 (開始測驗)"):
         ani_box = st.empty()
         # 替換為新的 GIF 連結 (思考/魔術師主題)
-        ani_box.image("https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExZTVrNWx1aGJzMGJ6OHo0OGd3MGswMXZ5azFhN25tMTRmMGVpbmZscSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/l0HFkA6omUOhqE2Jk/giphy.gif", caption="紅子老師正在準備考卷...", width=300)
+        ani_box.image("https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif", caption="紅子老師正在準備考卷...", width=300)
         
         with st.status("🧙‍♀️ 正在準備考卷...", expanded=True) as status:
             st.write("📖 閱讀故事中...")
@@ -354,7 +354,7 @@ elif st.session_state.step == 'testing':
 elif st.session_state.step == 'calculating':
     ani_box = st.empty()
     # 替換為新的 GIF 連結 (招財貓主題)
-    ani_box.image("https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3Zmb2N3NG53NTk4cTFnZGd6cTM0a3lmbGJvcXBhN3Foc2E2eTM1ZiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/83Xw14b98vE4R2lX3L/giphy.gif", caption="招財貓正在仔細批改...", width=300)
+    ani_box.image("https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif", caption="招財貓正在仔細批改...", width=300)
     
     with st.status("👩‍🏫 紅子老師正在看你的答案...", expanded=True) as status:
         total = 0
@@ -449,4 +449,5 @@ elif st.session_state.step == 'finished':
     if st.button("🔄 重新挑戰"):
         for k in list(st.session_state.keys()): del st.session_state[k]
         st.rerun()
+
 
