@@ -4,7 +4,7 @@ import datetime
 import os
 import json
 import time
-import re  # 匯入強力文字處理工具
+import re
 
 # ==========================================
 # 1. AI 設定與診斷區
@@ -119,13 +119,13 @@ def call_ai_generate_hint(question, wrong_answer, correct_option_index, options,
         correct_answer_text = "正確答案"
     
     prompt = f"""
-    請扮演紅子老闆娘給予提示。
+    學生答錯了。請扮演紅子老闆娘給予提示。
     【題目】：{question}
     【正確答案】：{correct_answer_text}
     【原則】：不直接給答案，用引導的方式。**請用繁體中文回覆，嚴禁使用日文。** 30字以內。
     """
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        model = genai.GenerativeModel('gemini-2.5-flash') 
         response = model.generate_content(prompt, safety_settings=safety_settings)
         return response.text.strip()
     except:
@@ -149,12 +149,12 @@ def call_ai_grade_qa(question, student_answer, story_text):
         
         if "|" in text:
             s, f = text.split("|", 1)
-            # --- 強化：確保分數是數字 ---
+            # 確保分數是數字
             if s.strip().isdigit():
                 return int(s.strip()), f.strip()
         
-        # --- 容錯處理：如果格式不符或 AI 忙碌，給予部分分數 ---
-        return 10, "格式錯誤，但已獲得部分分數。"
+        # 容錯處理：如果格式不符或 AI 忙碌，給予部分分數
+        return 10, "格式不符，但已獲得部分分數。"
     except Exception:
         # 如果連線失敗，回傳預設分數
         return 10, "評分系統連線失敗，請重試。"
@@ -162,10 +162,21 @@ def call_ai_grade_qa(question, student_answer, story_text):
 def call_ai_final_comment(total, level, story_text):
     if not ai_available: return "測驗完成！"
     
-    # 根據圖片中的風格進行優化：溫暖、鼓勵、具體
+    # --- 關鍵修改：要求簡潔且結構化的評語 (取代長篇大論) ---
     prompt = f"""
-    你是一位溫暖的老師。學生在閱讀測驗中獲得了 {total} 分 (滿分100)。
-    請寫一段繁體中文的評語，肯定學生的努力和實力。**嚴禁使用日文。**
+    你是一位簡潔且專業的閱讀老師。學生在閱讀測驗中獲得了 {total} 分 (滿分100)。
+    請用「繁體中文」寫一份總結報告，並使用 Markdown 格式（不可使用條列符號，需使用粗體）。
+
+    【報告結構】：
+    1. **總結判斷**：根據分數給出通過/優秀/不通過的結果 (1句話)。
+    2. **學習優勢**：指出他們做得最好的地方。
+    3. **閱讀技巧建議**：給出一個具體可執行的閱讀技巧指導 (例如：先看問題再讀文章)。
+    4. **語氣**：溫暖且專業。
+    
+    範例格式：
+    **總結：** 恭喜你通過了本次認證！
+    **優勢：** 你對故事的細節記憶力驚人，提取訊息能力優秀。
+    **技巧：** 建議下次在閱讀時，試著把角色之間的關係畫成圖表，幫助推論。
     """
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -251,7 +262,6 @@ elif st.session_state.step == 'confirm':
         st.session_state.quiz_data = quiz
         st.session_state.all_questions = []
         
-        # 依照規則：先 QA 再 MC
         if "qa_questions" in quiz:
             for q in quiz['qa_questions']: st.session_state.all_questions.append({'type': 'QA', 'data': q})
         if "mc_questions" in quiz:
