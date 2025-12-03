@@ -3,31 +3,51 @@ import pandas as pd
 import datetime
 import os
 import json
-import google.generativeai as genai
 
 # ==========================================
-# 1. 設定 AI (讀取保險箱裡的鑰匙)
+# 1. AI 設定與診斷區 (這一段會告訴我們發生什麼事)
 # ==========================================
-# 嘗試從 Streamlit Secrets 讀取金鑰
+ai_status_msg = ""
+ai_available = False
+
 try:
+    # 測試 1: 檢查是否能載入 Google 工具
+    import google.generativeai as genai
+    
+    # 測試 2: 檢查保險箱有沒有鑰匙
     if "GEMINI_API_KEY" in st.secrets:
-        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        api_key = st.secrets["GEMINI_API_KEY"]
+        genai.configure(api_key=api_key)
         ai_available = True
+        ai_status_msg = "✅ AI 連線成功！(驅動與金鑰皆正常)"
     else:
         ai_available = False
-except FileNotFoundError:
+        ai_status_msg = "❌ 失敗：Secrets 裡找不到 'GEMINI_API_KEY'。請檢查名稱是否完全正確 (全大寫)。"
+
+except ImportError:
     ai_available = False
+    ai_status_msg = "❌ 失敗：找不到 'google-generativeai' 工具。請確認 requirements.txt 有儲存成功。"
+except Exception as e:
+    ai_available = False
+    ai_status_msg = f"❌ 發生未預期的錯誤: {str(e)}"
 
 # ==========================================
 # 2. AI 核心功能區
 # ==========================================
 
+def get_mock_quiz():
+    """備用題庫"""
+    return {
+        "qa_questions": [{"id": 1, "question": "為什麼真由美會長出魚鱗？(這是備用題庫，代表 AI 設定失敗)", "score": 20}],
+        "mc_questions": [
+            {"id": 1, "type": "提取訊息", "question": "真由美用什麼換到了美人魚軟糖？", "options": ["1. 100元", "2. 昭和42年的10元", "3. 釦子", "4. 寶石"], "answer": "2"},
+            {"id": 2, "type": "推論訊息", "question": "錢天堂有什麼特徵？", "options": ["1. 在大馬路旁", "2. 只有幸運的人能找到", "3. 賣文具", "4. 老闆是男生"], "answer": "2"}
+        ]
+    }
+
 def call_ai_generate_quiz(level, text_content):
-    """
-    呼叫 Google Gemini 閱讀文章並出題
-    """
     if not ai_available:
-        return get_mock_quiz() # 如果沒鑰匙，就用舊的假題目避免當機
+        return get_mock_quiz()
 
     # 依照等級設定出題規則
     if level == "A":
@@ -39,107 +59,50 @@ def call_ai_generate_quiz(level, text_content):
 
     prompt = f"""
     你是一位專業的國小閱讀素養出題老師。請閱讀以下文章，並依照規則產出一份測驗卷。
-    
-    【文章內容】：
-    {text_content[:15000]} 
-    (若文章過長請只讀前15000字)
-
+    【文章內容】：{text_content[:15000]} 
     【{rule}】
-    
-    【重要格式要求】：
-    請直接回傳一個合法的 JSON 格式，不要有任何 Markdown 標記（不要寫 ```json）。
-    JSON 結構必須如下：
+    【格式要求】：請回傳純 JSON 格式。
+    JSON 結構範例：
     {{
-        "qa_questions": [
-            {{"id": 1, "question": "問答題題目...", "score": 20}},
-            ...
-        ],
-        "mc_questions": [
-            {{"id": 1, "type": "提取訊息", "question": "選擇題題目...", "options": ["1. 選項A", "2. 選項B", "3. 選項C", "4. 選項D"], "answer": "正確選項的編號(例如 2)"}},
-            ...
-        ]
+        "qa_questions": [{{"id": 1, "question": "...", "score": 20}}],
+        "mc_questions": [{{"id": 1, "type": "...", "question": "...", "options": ["1. A", "2. B", "3. C", "4. D"], "answer": "2"}}]
     }}
     請確保選擇題有 4 個選項。
     """
-
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
-        # 清理回應，確保是純 JSON
         clean_text = response.text.replace("```json", "").replace("```", "").strip()
-        quiz_json = json.loads(clean_text)
-        return quiz_json
+        return json.loads(clean_text)
     except Exception as e:
-        st.error(f"AI 出題時發生錯誤，改為使用備用題庫。錯誤原因：{e}")
+        st.sidebar.error(f"AI 出題過程發生錯誤: {e}")
         return get_mock_quiz()
 
 def call_ai_grade_qa(question, student_answer, story_text):
-    """
-    呼叫 AI 評分問答題
-    """
-    if not ai_available:
-        return 15, "（模擬評分）寫得不錯！但請記得我們現在還沒接上真 AI 喔。"
-
-    prompt = f"""
-    你是國小閱讀老師。請針對學生的回答進行評分。
-    
-    題目：{question}
-    學生回答：{student_answer}
-    文章背景：請依據剛才閱讀的故事內容。
-    
-    【評分標準 (滿分20分)】：
-    1. 了解題意 (0-6分)
-    2. 內容正確合理 (0-6分)
-    3. 獨特見解與創意 (0-8分)
-    
-    請回傳格式：
-    分數|評語
-    (例如：16|你能理解故事，但在創意部分可以再多一點想法。)
-    """
-    
+    if not ai_available: return 15, "（模擬評分）AI 未連線。"
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(prompt)
+        response = model.generate_content(f"請評分(滿分20)：題目：{question}，回答：{student_answer}。回傳格式：分數|評語")
         text = response.text.strip()
         if "|" in text:
-            score_str, feedback = text.split("|", 1)
-            return int(float(score_str)), feedback
-        else:
-            return 10, text # 格式跑掉時的預設處理
+            s, f = text.split("|", 1)
+            return int(float(s)), f
+        return 10, text
     except:
-        return 10, "AI 評分連線忙碌中，給予基本分。"
+        return 10, "AI 評分忙碌中。"
 
-def call_ai_final_comment(total_score, qa_feedback, story_text):
-    if not ai_available:
-        return "模擬總評：恭喜完成測驗！"
-        
-    prompt = f"""
-    學生完成了閱讀測驗，總分是 {total_score} 分。
-    請給學生一段 50 字以內的繁體中文鼓勵評語，語氣要溫柔、正向，像一位親切的老師。
-    """
+def call_ai_final_comment(total, qa_feedback, story_text):
+    if not ai_available: return "模擬總評：完成！"
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(prompt)
-        return response.text.strip()
+        return model.generate_content(f"給予總分 {total} 分的學生一句繁體中文鼓勵。").text.strip()
     except:
         return "測驗完成！繼續加油！"
 
-def get_mock_quiz():
-    """備用題庫 (當 AI 連線失敗時使用)"""
-    return {
-        "qa_questions": [{"id": 1, "question": "為什麼真由美會長出魚鱗？(備用題庫)", "score": 20}],
-        "mc_questions": [
-            {"id": 1, "type": "提取訊息", "question": "真由美用什麼換到了美人魚軟糖？", "options": ["1. 100元", "2. 昭和42年的10元", "3. 釦子", "4. 寶石"], "answer": "2"},
-            {"id": 2, "type": "推論訊息", "question": "錢天堂有什麼特徵？", "options": ["1. 在大馬路旁", "2. 只有幸運的人能找到", "3. 賣文具", "4. 老闆是男生"], "answer": "2"}
-        ]
-    }
-
 # ==========================================
-# 3. 系統與介面 (這裡大部分不用動)
+# 3. 介面
 # ==========================================
-
 FILE_NAME = "reading_records.csv"
-
 def save_to_csv(data):
     df_new = pd.DataFrame([data])
     if not os.path.exists(FILE_NAME):
@@ -149,31 +112,30 @@ def save_to_csv(data):
 
 def load_story():
     if os.path.exists("story.txt"):
-        with open("story.txt", "r", encoding="utf-8") as f:
-            return f.read()
-    return "找不到 story.txt，請確認檔案是否存在。"
+        with open("story.txt", "r", encoding="utf-8") as f: return f.read()
+    return "找不到 story.txt"
 
 st.set_page_config(page_title="神奇柑仔店 - AI 閱讀認證", page_icon="🤖")
 st.title("🤖 神奇柑仔店 - AI 閱讀挑戰")
 
-if not ai_available:
-    st.warning("⚠️ 尚未偵測到 API Key，系統目前為「模擬模式」。請老師到 Streamlit Secrets 設定 GEMINI_API_KEY。")
-
 # --- 側邊欄 ---
 with st.sidebar:
-    st.header("1. 學生資料登入")
-    student_class = st.text_input("班級", placeholder="例如：501")
-    seat_num = st.text_input("座號", placeholder="例如：05")
-    student_name = st.text_input("姓名", placeholder="王小明")
+    st.header("🔧 系統狀態檢查")
+    # 這裡會顯示紅字或綠字，告訴我們哪裡錯了
+    if ai_available:
+        st.success(ai_status_msg)
+    else:
+        st.error(ai_status_msg)
+        
     st.markdown("---")
+    st.header("1. 學生資料")
+    student_class = st.text_input("班級")
+    seat_num = st.text_input("座號")
+    student_name = st.text_input("姓名")
     st.header("2. 老師專區")
-    password = st.text_input("輸入密碼下載報表", type="password")
-    if password == "1234":
+    if st.text_input("密碼", type="password") == "1234":
         if os.path.exists(FILE_NAME):
-            with open(FILE_NAME, "rb") as f:
-                st.download_button("下載 Excel (CSV)", f, file_name="student_scores.csv")
-        else:
-            st.info("目前還沒有資料喔！")
+            with open(FILE_NAME, "rb") as f: st.download_button("下載成績單", f, "scores.csv")
 
 # --- 初始化 ---
 if 'step' not in st.session_state: st.session_state.step = 'login'
@@ -182,155 +144,89 @@ if 'current_q_index' not in st.session_state: st.session_state.current_q_index =
 if 'answers' not in st.session_state: st.session_state.answers = []
 if 'history' not in st.session_state: st.session_state.history = []
 
-# --- 流程控制 ---
+# --- 流程 ---
 if not (student_class and seat_num and student_name):
     st.warning("👈 請先輸入班級、座號、姓名")
     st.stop()
 
 if st.session_state.step == 'login':
     st.subheader(f"👋 {student_name} 你好！")
-    st.write("請選擇挑戰等級：")
     c1, c2, c3 = st.columns(3)
-    if c1.button("等級 A (一般)"): 
-        st.session_state.level = "A"
-        st.session_state.step = 'confirm_level'
-        st.rerun()
-    if c2.button("等級 B (精熟)"): 
-        st.session_state.level = "B"
-        st.session_state.step = 'confirm_level'
-        st.rerun()
-    if c3.button("等級 C (深刻)"): 
-        st.session_state.level = "C"
-        st.session_state.step = 'confirm_level'
-        st.rerun()
+    if c1.button("A 一般"): 
+        st.session_state.level = "A"; st.session_state.step = 'confirm'; st.rerun()
+    if c2.button("B 精熟"): 
+        st.session_state.level = "B"; st.session_state.step = 'confirm'; st.rerun()
+    if c3.button("C 深刻"): 
+        st.session_state.level = "C"; st.session_state.step = 'confirm'; st.rerun()
 
-elif st.session_state.step == 'confirm_level':
-    st.info(f"你選擇了等級 {st.session_state.level}，AI 老師正在讀書出題，請稍等...")
+elif st.session_state.step == 'confirm':
     if st.button("開始測驗"):
-        with st.spinner("AI 正在閱讀《神奇柑仔店》並生成題目中... (約需 10-20 秒)"):
-            story_text = load_story()
-            quiz = call_ai_generate_quiz(st.session_state.level, story_text)
+        with st.spinner("AI 準備中..."):
+            story = load_story()
+            quiz = call_ai_generate_quiz(st.session_state.level, story)
             st.session_state.quiz_data = quiz
             st.session_state.all_questions = []
-            
-            # 整合題目
             if "qa_questions" in quiz:
-                for q in quiz['qa_questions']: 
-                    st.session_state.all_questions.append({'type': 'QA', 'data': q})
+                for q in quiz['qa_questions']: st.session_state.all_questions.append({'type': 'QA', 'data': q})
             if "mc_questions" in quiz:
-                for q in quiz['mc_questions']: 
-                    st.session_state.all_questions.append({'type': 'MC', 'data': q})
+                for q in quiz['mc_questions']: st.session_state.all_questions.append({'type': 'MC', 'data': q})
             
-            # 開場白
-            st.session_state.history = []
-            st.session_state.history.append({"role": "bot", "content": f"你好！我是 AI 閱讀老師。我剛剛讀完了這本書，現在要來考考你。\n\n我們一題一題來，準備好了嗎？"})
-            
-            # 第一題
+            st.session_state.history = [{"role": "bot", "content": "你好！我是 AI 老師，測驗開始囉！"}]
             if len(st.session_state.all_questions) > 0:
-                first_q = st.session_state.all_questions[0]
-                if first_q['type'] == 'QA':
-                    st.session_state.history.append({"role": "bot", "content": f"【問答題】 {first_q['data']['question']}"})
-                else:
-                    opts = "\n".join(first_q['data']['options'])
-                    st.session_state.history.append({"role": "bot", "content": f"【選擇題】 {first_q['data']['question']}\n{opts}"})
+                q1 = st.session_state.all_questions[0]
+                q_text = q1['data']['question']
+                if q1['type'] == 'MC': q_text += "\n" + "\n".join(q1['data']['options'])
+                st.session_state.history.append({"role": "bot", "content": f"【第一題】{q_text}"})
                 st.session_state.step = 'testing'
                 st.rerun()
-            else:
-                st.error("AI 出題失敗，請重新整理試試看。")
 
 elif st.session_state.step == 'testing':
     for msg in st.session_state.history:
         with st.chat_message(msg["role"]): st.write(msg["content"])
     
-    current_idx = st.session_state.current_q_index
-    total_q = len(st.session_state.all_questions)
-    
-    if current_idx < total_q:
-        q_data = st.session_state.all_questions[current_idx]
-        if q_data['type'] == 'QA':
-            user_input = st.chat_input("請輸入回答...")
-        else:
-            user_input = st.chat_input("請輸入選項編號 (例如: 2)")
-
+    idx = st.session_state.current_q_index
+    if idx < len(st.session_state.all_questions):
+        q = st.session_state.all_questions[idx]
+        user_input = st.chat_input("請輸入答案...")
         if user_input:
             with st.chat_message("user"): st.write(user_input)
             st.session_state.history.append({"role": "user", "content": user_input})
-            st.session_state.answers.append({
-                "type": q_data['type'], 
-                "user_response": user_input, 
-                "question_data": q_data['data']
-            })
+            st.session_state.answers.append({"type": q['type'], "user_response": user_input, "question_data": q['data']})
             
-            next_idx = current_idx + 1
+            next_idx = idx + 1
             st.session_state.current_q_index = next_idx
-            
-            if next_idx < total_q:
-                next_q = st.session_state.all_questions[next_idx]
-                if next_q['type'] == 'QA':
-                    content = f"【問答題】 {next_q['data']['question']}"
-                else:
-                    opts = "\n".join(next_q['data']['options'])
-                    content = f"【選擇題】 {next_q['data']['question']}\n{opts}"
-                
-                bot_msg = f"收到！\n\n下一題：\n{content}"
-                st.session_state.history.append({"role": "bot", "content": bot_msg})
+            if next_idx < len(st.session_state.all_questions):
+                nq = st.session_state.all_questions[next_idx]
+                nq_text = nq['data']['question']
+                if nq['type'] == 'MC': nq_text += "\n" + "\n".join(nq['data']['options'])
+                st.session_state.history.append({"role": "bot", "content": f"收到！下一題：\n{nq_text}"})
                 st.rerun()
             else:
-                st.session_state.step = 'calculating'
-                st.rerun()
+                st.session_state.step = 'calculating'; st.rerun()
 
 elif st.session_state.step == 'calculating':
-    with st.spinner("AI 老師正在改考卷...請稍等..."):
-        story_text = load_story()
-        total = 0
-        mc_score = 0
-        qa_score = 0
-        
+    with st.spinner("改考卷中..."):
+        total = 0; mc = 0; qa = 0
+        story = load_story()
         for ans in st.session_state.answers:
             if ans['type'] == 'MC':
-                # 簡單比對第一個字元
-                user_ans = str(ans['user_response']).strip()[0]
-                correct = str(ans['question_data']['answer']).strip()[0]
-                
-                # 配分邏輯
-                pts = 8 # A
-                if st.session_state.level == "B": pts = 6
-                elif st.session_state.level == "C": pts = 4
-                
-                if user_ans == correct:
-                    total += pts
-                    mc_score += pts
-            elif ans['type'] == 'QA':
-                score, fb = call_ai_grade_qa(ans['question_data']['question'], ans['user_response'], story_text)
-                total += score
-                qa_score += score
+                if str(ans['user_response'])[0] == str(ans['question_data']['answer'])[0]:
+                    pts = 8 if st.session_state.level == "A" else (6 if st.session_state.level == "B" else 4)
+                    total += pts; mc += pts
+            else:
+                s, f = call_ai_grade_qa(ans['question_data']['question'], ans['user_response'], story)
+                total += s; qa += s
         
-        final_cmt = call_ai_final_comment(total, "", story_text)
-        
-        rec = {
-            "班級": student_class,
-            "座號": seat_num,
-            "姓名": student_name,
-            "日期": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "等級": st.session_state.level,
-            "選擇題得分": mc_score,
-            "問答題得分": qa_score,
-            "總分": total,
-            "機器人總評": final_cmt
-        }
+        cmt = call_ai_final_comment(total, "", story)
+        rec = {"班級": student_class, "座號": seat_num, "姓名": student_name, "日期": datetime.datetime.now().strftime("%Y-%m-%d"), "總分": total, "評語": cmt}
         save_to_csv(rec)
-        st.session_state.final_result = rec
-        st.session_state.step = 'finished'
-        st.rerun()
+        st.session_state.final = rec; st.session_state.step = 'finished'; st.rerun()
 
 elif st.session_state.step == 'finished':
-    res = st.session_state.final_result
+    res = st.session_state.final
     st.balloons()
-    st.markdown(f"### 📄 成績單\n**姓名**：{res['姓名']}\n**總分**：{res['總分']} 分")
-    if res['總分'] >= 60: st.success("通過認證！ 🎉")
-    else: st.error("未通過，再加油！ 💪")
-    st.info(f"**AI 老師評語**：\n{res['機器人總評']}")
-    
+    st.success(f"總分：{res['總分']} 分")
+    st.info(res['評語'])
     if st.button("重新開始"):
         for k in list(st.session_state.keys()): del st.session_state[k]
         st.rerun()
