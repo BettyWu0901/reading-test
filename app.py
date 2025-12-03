@@ -47,23 +47,32 @@ def get_mock_quiz():
 def call_ai_generate_quiz(level, text_content):
     if not ai_available: return get_mock_quiz()
     
+    # 針對不同等級設定具體題型
     if level == "A":
-        rule = "難度：簡單。包含：提取訊息2題、推論訊息4題。問答題1題。"
+        rule = "難度：適合國小中年級。著重於「提取訊息」與簡單的「推論」。問答題請問關於角色感受或具體情節。"
     elif level == "B":
-        rule = "難度：中等。包含：推論訊息3題、比較評估6題。問答題2題。"
+        rule = "難度：適合國小高年級。包含「詮釋整合」。問答題請讓學生推測角色的動機或故事的轉折原因。"
     else:
-        rule = "難度：困難。包含：詮釋整合與比較評估7題。問答題3題。"
+        rule = "難度：適合國中程度。包含「比較評估」。問答題請讓學生探討故事背後的寓意或價值觀判斷。"
 
+    # --- 關鍵修正：限制 AI 的出題視角 ---
     prompt = f"""
-    你是一位專業的閱讀素養出題老師。請閱讀文章並出題。
-    【文章】：{text_content[:30000]} 
-    【規則】：{rule}
-    【格式】：純 JSON。
-    JSON 範例：
+    請你根據以下故事內容，為國小學生設計一份閱讀測驗。
+    【文章內容】：{text_content[:30000]} 
+    
+    【出題規則】：
+    1. {rule}
+    2. **嚴格禁止**：絕對不要問「如果你是老師」、「如何評估這篇文章」等與教育學相關的問題。
+    3. **題目焦點**：所有題目都必須針對「故事劇情」、「角色行為」、「結局寓意」來提問。
+    4. 題目語言要生動有趣，符合《神奇柑仔店》的風格。
+
+    【格式要求】：請回傳純 JSON 格式。
+    JSON 結構範例：
     {{
-        "qa_questions": [{{"id": 1, "question": "...", "score": 20}}],
+        "qa_questions": [{{"id": 1, "question": "為什麼主角最後會...", "score": 20}}],
         "mc_questions": [{{"id": 1, "type": "...", "question": "...", "options": ["1. A", "2. B", "3. C", "4. D"], "answer": "2"}}]
     }}
+    請確保選擇題有 4 個選項。
     """
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -73,22 +82,25 @@ def call_ai_generate_quiz(level, text_content):
     except:
         return get_mock_quiz()
 
-# --- 新增：專門給選擇題錯題用的提示產生器 ---
+# 專門給選擇題錯題用的提示產生器
 def call_ai_generate_hint(question, wrong_answer, correct_option_index, options, story_text):
     if not ai_available: return "請再讀一次故事喔！"
     
-    correct_answer_text = options[int(correct_option_index)-1]
+    try:
+        correct_answer_text = options[int(correct_option_index)-1]
+    except:
+        correct_answer_text = "正確答案"
     
     prompt = f"""
-    學生在選擇題答錯了。請根據故事內容，給他一個「引導式提示」，幫助他下次選對。
+    學生在《神奇柑仔店》的閱讀測驗中答錯了。請扮演紅子老闆娘，給他一個提示。
     【題目】：{question}
-    【學生選了錯誤答案】：{wrong_answer}
+    【學生誤選】：{wrong_answer}
     【正確答案是】：{correct_answer_text}
     【原則】：
-    1. **絕對不要直接說出正確答案**。
-    2. 請用提問或回憶的方式引導。例如：「你記得文章裡提到...是什麼顏色嗎？」、「店長那時候說了什麼話？」
-    3. 語氣溫暖，不帶責備。
-    4. 繁體中文，30字以內。
+    1. **絕對不要直接說出答案**。
+    2. 請用引導的方式，例如：「哎呀，再仔細想想，那時候是不是...？」
+    3. 語氣要像老闆娘紅子一樣，神秘但溫柔。
+    4. 30字以內。
     """
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -101,17 +113,16 @@ def call_ai_grade_qa(question, student_answer, story_text):
     if not ai_available: return 15, "AI 未連線，無法評分。"
     
     prompt = f"""
-    你是一位蘇格拉底式的引導老師。請針對學生的回答進行評分與回饋。
+    請扮演《神奇柑仔店》的紅子老闆娘，批改學生的問答題。
     【題目】：{question}
     【學生回答】：{student_answer}
     【評分標準】：滿分 20 分。
     【回饋原則】：
-    1. 若回答錯誤或不完整，**絕對不要直接給正確答案**。
-    2. 請給予「反思性提問」或「提示」。
-    3. 若回答正確，請具體稱讚。
-    4. 語氣要溫柔鼓勵。
+    1. 若回答錯誤，請用神秘的口吻引導他思考正確方向，**不要直接給答案**。
+    2. 若回答正確，請稱讚他很有眼光，是幸運的客人。
+    3. 語氣要符合角色設定（成熟、神秘、溫暖）。
     
-    回傳格式：分數|評語 (請用繁體中文)
+    回傳格式：分數|評語 (繁體中文)
     """
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -127,9 +138,9 @@ def call_ai_grade_qa(question, student_answer, story_text):
 def call_ai_final_comment(total, history_summary, story_text):
     if not ai_available: return "測驗完成！繼續加油！"
     prompt = f"""
-    學生在閱讀測驗中獲得了 {total} 分。
-    請給予一句簡短、溫暖的繁體中文鼓勵。
-    不要提到具體題目，專注於學習態度。
+    學生在測驗中獲得 {total} 分。
+    請用《神奇柑仔店》老闆娘紅子的口吻，給他一句結語。
+    例如：「你今天的運勢不錯...」或「看來你還需要更多修練...」。
     """
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
@@ -290,8 +301,8 @@ elif st.session_state.step == 'calculating':
         
         for ans in st.session_state.answers:
             if ans['type'] == 'MC':
-                correct_opt_char = str(ans['data']['answer'])[0] # "2"
-                user_opt_char = str(ans['user_response'])[0]     # "2"
+                correct_opt_char = str(ans['data']['answer'])[0]
+                user_opt_char = str(ans['user_response'])[0]
                 
                 is_correct = (correct_opt_char == user_opt_char)
                 pts = 0
@@ -299,10 +310,10 @@ elif st.session_state.step == 'calculating':
                 
                 if is_correct:
                     pts = 8 if st.session_state.level == "A" else 5
-                    feedback = "✅ 答對了！你對故事細節看得很仔細呢！"
+                    feedback = "✅ 答對了！紅子老闆娘覺得你很有眼光！"
                 else:
-                    # --- 這裡改了！呼叫 AI 生成專屬提示 ---
                     st.write(f"正在分析選擇題錯誤：{ans['question'][:10]}...")
+                    # 呼叫 AI 生成提示
                     feedback = call_ai_generate_hint(
                         ans['question'], 
                         ans['user_response'], 
@@ -356,7 +367,6 @@ elif st.session_state.step == 'finished':
     st.write("來看看紅子老師對每一題的建議吧！")
     
     for i, ans in enumerate(st.session_state.answers):
-        # 使用顏色標示對錯 (綠色高分，紅色低分)
         score_color = "green" if ans['score'] > 0 else "red"
         title_text = f"第 {i+1} 題：{ans['question']} (:{score_color}[{ans['score']}分])"
         
