@@ -29,7 +29,6 @@ except Exception as e:
 # 2. AI 核心功能區 (Prompt 優化)
 # ==========================================
 
-# 安全設定
 safety_settings = [
     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
     {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -74,10 +73,33 @@ def call_ai_generate_quiz(level, text_content):
     except:
         return get_mock_quiz()
 
+# --- 新增：專門給選擇題錯題用的提示產生器 ---
+def call_ai_generate_hint(question, wrong_answer, correct_option_index, options, story_text):
+    if not ai_available: return "請再讀一次故事喔！"
+    
+    correct_answer_text = options[int(correct_option_index)-1]
+    
+    prompt = f"""
+    學生在選擇題答錯了。請根據故事內容，給他一個「引導式提示」，幫助他下次選對。
+    【題目】：{question}
+    【學生選了錯誤答案】：{wrong_answer}
+    【正確答案是】：{correct_answer_text}
+    【原則】：
+    1. **絕對不要直接說出正確答案**。
+    2. 請用提問或回憶的方式引導。例如：「你記得文章裡提到...是什麼顏色嗎？」、「店長那時候說了什麼話？」
+    3. 語氣溫暖，不帶責備。
+    4. 繁體中文，30字以內。
+    """
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        response = model.generate_content(prompt, safety_settings=safety_settings)
+        return response.text.strip()
+    except:
+        return "這題有點難，建議你回頭找找文章中的細節喔！"
+
 def call_ai_grade_qa(question, student_answer, story_text):
     if not ai_available: return 15, "AI 未連線，無法評分。"
     
-    # --- 優化重點：引導式回饋 Prompt ---
     prompt = f"""
     你是一位蘇格拉底式的引導老師。請針對學生的回答進行評分與回饋。
     【題目】：{question}
@@ -85,8 +107,8 @@ def call_ai_grade_qa(question, student_answer, story_text):
     【評分標準】：滿分 20 分。
     【回饋原則】：
     1. 若回答錯誤或不完整，**絕對不要直接給正確答案**。
-    2. 請給予「反思性提問」或「提示」，引導學生自己找出文章中的線索。例如：「你記得文章中關於...是怎麼描述的嗎？」
-    3. 若回答正確，請具體稱讚哪裡寫得好。
+    2. 請給予「反思性提問」或「提示」。
+    3. 若回答正確，請具體稱讚。
     4. 語氣要溫柔鼓勵。
     
     回傳格式：分數|評語 (請用繁體中文)
@@ -104,10 +126,9 @@ def call_ai_grade_qa(question, student_answer, story_text):
 
 def call_ai_final_comment(total, history_summary, story_text):
     if not ai_available: return "測驗完成！繼續加油！"
-    # 根據總分給予整體鼓勵，不涉及單題細節
     prompt = f"""
     學生在閱讀測驗中獲得了 {total} 分。
-    請給予一句簡短、溫暖的繁體中文鼓勵，鼓勵他保持好奇心或再接再厲。
+    請給予一句簡短、溫暖的繁體中文鼓勵。
     不要提到具體題目，專注於學習態度。
     """
     try:
@@ -191,7 +212,7 @@ elif st.session_state.step == 'confirm':
             status.update(label="✅ 準備就緒", state="complete", expanded=False)
             time.sleep(0.5)
         
-        ani_box.empty() # 清除動畫
+        ani_box.empty()
 
         # 題目處理
         st.session_state.quiz_data = quiz
@@ -208,26 +229,19 @@ elif st.session_state.step == 'confirm':
             st.error("出題失敗，請重試。")
 
 elif st.session_state.step == 'testing':
-    # --- 優化 1：顯示清楚的題號與進度 ---
     total_q = len(st.session_state.all_questions)
     current_idx = st.session_state.current_q_index
     q_data = st.session_state.all_questions[current_idx]
     
-    # 進度條
     st.progress((current_idx) / total_q)
     st.caption(f"進度：{current_idx + 1} / {total_q}")
     
-    # 題目卡片
     st.markdown(f"### 📝 第 {current_idx + 1} 題")
-    
-    # 顯示題目內容
     question_text = q_data['data']['question']
     st.info(question_text)
     
-    # 作答區
     if q_data['type'] == 'MC':
         options = q_data['data']['options']
-        # 使用 radio button 讓選擇題更好點選
         user_ans = st.radio("請選擇答案：", options, index=None, key=f"q_{current_idx}")
         
         if st.button("送出答案"):
@@ -238,7 +252,6 @@ elif st.session_state.step == 'testing':
                     "user_response": user_ans, 
                     "data": q_data['data']
                 })
-                # 下一題邏輯
                 if current_idx + 1 < total_q:
                     st.session_state.current_q_index += 1
                     st.rerun()
@@ -248,7 +261,7 @@ elif st.session_state.step == 'testing':
             else:
                 st.warning("請先選擇一個答案喔！")
                 
-    else: # 問答題
+    else: # QA
         user_ans = st.text_area("請輸入你的看法：", height=150, key=f"q_{current_idx}")
         if st.button("送出答案"):
             if user_ans:
@@ -258,7 +271,6 @@ elif st.session_state.step == 'testing':
                     "user_response": user_ans, 
                     "data": q_data['data']
                 })
-                # 下一題邏輯
                 if current_idx + 1 < total_q:
                     st.session_state.current_q_index += 1
                     st.rerun()
@@ -269,53 +281,55 @@ elif st.session_state.step == 'testing':
                 st.warning("請寫下你的答案喔！")
 
 elif st.session_state.step == 'calculating':
-    # --- 優化 2：批改時的等待動畫 (避免畫面變白) ---
     ani_box = st.empty()
     ani_box.image("https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif", caption="招財貓正在仔細批改...", width=300)
     
     with st.status("👩‍🏫 紅子老師正在看你的答案...", expanded=True) as status:
         total = 0
         story = load_story()
-        final_feedback_list = []
         
-        # 逐題批改
         for ans in st.session_state.answers:
             if ans['type'] == 'MC':
-                # 選擇題簡單判斷
-                correct_opt = str(ans['data']['answer'])[0] # 取 "2"
-                user_opt = str(ans['user_response'])[0]     # 取 "2"
+                correct_opt_char = str(ans['data']['answer'])[0] # "2"
+                user_opt_char = str(ans['user_response'])[0]     # "2"
                 
-                is_correct = (correct_opt == user_opt)
+                is_correct = (correct_opt_char == user_opt_char)
                 pts = 0
                 feedback = ""
                 
                 if is_correct:
                     pts = 8 if st.session_state.level == "A" else 5
-                    feedback = "✅ 答對了！觀察很敏銳喔！"
+                    feedback = "✅ 答對了！你對故事細節看得很仔細呢！"
                 else:
-                    feedback = f"💡 這題有點可惜。再讀讀看故事，想想看為什麼不是選 {user_opt} 呢？"
+                    # --- 這裡改了！呼叫 AI 生成專屬提示 ---
+                    st.write(f"正在分析選擇題錯誤：{ans['question'][:10]}...")
+                    feedback = call_ai_generate_hint(
+                        ans['question'], 
+                        ans['user_response'], 
+                        correct_opt_char, 
+                        ans['data']['options'],
+                        story
+                    )
+                    feedback = "💡 " + feedback
                 
                 total += pts
                 ans['score'] = pts
                 ans['feedback'] = feedback
                 
-            else: # QA 問答題
+            else: # QA
                 st.write(f"正在批改問答題：{ans['question'][:10]}...")
-                # 呼叫 AI 進行引導式評分
                 s, f = call_ai_grade_qa(ans['question'], ans['user_response'], story)
                 total += s
                 ans['score'] = s
-                ans['feedback'] = f # 這裡是 AI 給的引導性評語
+                ans['feedback'] = f
         
         status.update(label="批改完成！", state="complete")
         time.sleep(1)
     
     ani_box.empty()
     
-    # 產生總評
     cmt = call_ai_final_comment(total, "", story)
     
-    # 儲存
     rec = {
         "班級": student_class, 
         "座號": seat_num, 
@@ -338,15 +352,17 @@ elif st.session_state.step == 'finished':
     
     st.divider()
     
-    # --- 優化 3：詳細檢討 (針對學生的回答給予反饋) ---
     st.subheader("🧐 詳細檢討與省思")
-    st.write("來看看紅子老師對每一題的建議吧！(請仔細閱讀，不要只看分數喔)")
+    st.write("來看看紅子老師對每一題的建議吧！")
     
     for i, ans in enumerate(st.session_state.answers):
-        with st.expander(f"第 {i+1} 題：{ans['question']} ({ans['score']}分)", expanded=True):
-            st.markdown(f"**你的回答：**\n > {ans['user_response']}")
+        # 使用顏色標示對錯 (綠色高分，紅色低分)
+        score_color = "green" if ans['score'] > 0 else "red"
+        title_text = f"第 {i+1} 題：{ans['question']} (:{score_color}[{ans['score']}分])"
+        
+        with st.expander(title_text, expanded=True):
+            st.markdown(f"**你的回答：** {ans['user_response']}")
             st.markdown(f"**👩‍🏫 老師的回饋：**")
-            # 這裡顯示的是 AI 生成的引導性評語，或是選擇題的提示
             st.info(ans['feedback'])
             
     if st.button("🔄 重新挑戰"):
