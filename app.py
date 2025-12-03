@@ -4,6 +4,7 @@ import datetime
 import os
 import json
 import time
+import re  # 匯入強力文字處理工具
 
 # ==========================================
 # 1. AI 設定與診斷區
@@ -26,9 +27,10 @@ except Exception as e:
     ai_status_msg = f"❌ 錯誤: {str(e)}"
 
 # ==========================================
-# 2. AI 核心功能區 (Prompt 優化)
+# 2. AI 核心功能區 (最穩定版)
 # ==========================================
 
+# 安全設定：防止 AI 被鬼故事內容嚇到而拒絕出題
 safety_settings = [
     {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
     {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
@@ -38,115 +40,138 @@ safety_settings = [
 
 def get_mock_quiz():
     return {
-        "qa_questions": [{"id": 1, "question": "為什麼真由美會長出魚鱗？(備用題庫)", "score": 20}],
+        "qa_questions": [{"id": 1, "question": "為什麼真由美會長出魚鱗？(這是備用題庫，代表 AI 連線逾時或格式錯誤，請重試)", "score": 20}],
         "mc_questions": [
-            {"id": 1, "type": "提取訊息", "question": "真由美用什麼換到了美人魚軟糖？", "options": ["1. 100元", "2. 昭和42年的10元", "3. 釦子", "4. 寶石"], "answer": "2"}
+            {"id": 1, "type": "提取訊息", "question": "真由美用什麼換到了美人魚軟糖？", "options": ["1. 100元", "2. 昭和42年的10元", "3. 釦子", "4. 寶石", "5. 貝殼", "6. 勇氣"], "answer": "2"}
         ]
     }
+
+# --- 強力 JSON 解析器 (防止 AI 廢話導致錯誤) ---
+def extract_json(text):
+    """嘗試從 AI 回傳的文字中抓出 JSON 物件"""
+    try:
+        return json.loads(text)
+    except:
+        pass
+    
+    try:
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        if match:
+            json_str = match.group()
+            return json.loads(json_str)
+    except:
+        pass
+        
+    return None
 
 def call_ai_generate_quiz(level, text_content):
     if not ai_available: return get_mock_quiz()
     
-    # 針對不同等級設定具體題型
+    # --- 依照《閱讀認證規則.txt》設定嚴格規則 ---
     if level == "A":
-        rule = "難度：適合國小中年級。著重於「提取訊息」與簡單的「推論」。問答題請問關於角色感受或具體情節。"
+        rule = """
+        【等級A (一般) 規則】：1. 問答題 1 題 (20分)。2. 選擇題 10 題 (8分)。包含：提取訊息2題、推論訊息4題、詮釋整合4題。
+        """
     elif level == "B":
-        rule = "難度：適合國小高年級。包含「詮釋整合」。問答題請讓學生推測角色的動機或故事的轉折原因。"
+        rule = """
+        【等級B (精熟) 規則】：1. 問答題 2 題 (20分)。2. 選擇題 10 題 (6分)。包含：提取訊息1題、推論訊息3題、詮釋整合6題。
+        """
     else:
-        rule = "難度：適合國中程度。包含「比較評估」。問答題請讓學生探討故事背後的寓意或價值觀判斷。"
+        rule = """
+        【等級C (深刻) 規則】：1. 問答題 3 題 (20分)。2. 選擇題 10 題 (4分)。包含：推論訊息3題、詮釋整合7題。
+        """
 
-    # --- 關鍵修正：限制 AI 的出題視角 ---
     prompt = f"""
-    請你根據以下故事內容，為國小學生設計一份閱讀測驗。
+    請你根據以下《神奇柑仔店》的故事內容，為國小學生設計一份「閱讀認證測驗」。
     【文章內容】：{text_content[:30000]} 
     
-    【出題規則】：
-    1. {rule}
-    2. **嚴格禁止**：絕對不要問「如果你是老師」、「如何評估這篇文章」等與教育學相關的問題。
-    3. **題目焦點**：所有題目都必須針對「故事劇情」、「角色行為」、「結局寓意」來提問。
-    4. 題目語言要生動有趣，符合《神奇柑仔店》的風格。
+    【重要出題規則】：
+    {rule}
+    3. **題目順序**：JSON 中請包含 `qa_questions` (問答) 和 `mc_questions` (選擇)。
+    4. **選擇題選項**：每題必須有 **6 個選項** (1~6)，且要有合理的誘答性。
+    5. **題目焦點**：針對故事劇情、角色行為、寓意提問。嚴禁問教育學或評估文章的問題。
+    6. **語言**：全程使用繁體中文。
 
     【格式要求】：請回傳純 JSON 格式。
-    JSON 結構範例：
-    {{
-        "qa_questions": [{{"id": 1, "question": "為什麼主角最後會...", "score": 20}}],
-        "mc_questions": [{{"id": 1, "type": "...", "question": "...", "options": ["1. A", "2. B", "3. C", "4. D"], "answer": "2"}}]
-    }}
-    請確保選擇題有 4 個選項。
     """
+    
+    # 使用你帳號唯一可用的模型
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt, safety_settings=safety_settings)
-        clean_text = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(clean_text)
-    except:
+        
+        data = extract_json(response.text)
+        if data:
+            return data
+        else:
+            st.sidebar.error("⚠️ AI 回傳格式錯誤，無法解析題目。")
+            return get_mock_quiz()
+            
+    except Exception as e:
+        st.sidebar.error(f"⚠️ AI 連線發生錯誤: {e}")
         return get_mock_quiz()
 
-# 專門給選擇題錯題用的提示產生器
 def call_ai_generate_hint(question, wrong_answer, correct_option_index, options, story_text):
     if not ai_available: return "請再讀一次故事喔！"
-    
     try:
         correct_answer_text = options[int(correct_option_index)-1]
     except:
         correct_answer_text = "正確答案"
     
     prompt = f"""
-    學生在《神奇柑仔店》的閱讀測驗中答錯了。請扮演紅子老闆娘，給他一個提示。
+    請扮演紅子老闆娘給予提示。
     【題目】：{question}
-    【學生誤選】：{wrong_answer}
-    【正確答案是】：{correct_answer_text}
-    【原則】：
-    1. **絕對不要直接說出答案**。
-    2. 請用引導的方式，例如：「哎呀，再仔細想想，那時候是不是...？」
-    3. 語氣要像老闆娘紅子一樣，神秘但溫柔。
-    4. 30字以內。
+    【正確答案】：{correct_answer_text}
+    【原則】：不直接給答案，用引導的方式。**請用繁體中文回覆，嚴禁使用日文。** 30字以內。
     """
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt, safety_settings=safety_settings)
         return response.text.strip()
     except:
-        return "這題有點難，建議你回頭找找文章中的細節喔！"
+        return "再仔細想想故事細節喔！"
 
 def call_ai_grade_qa(question, student_answer, story_text):
-    if not ai_available: return 15, "AI 未連線，無法評分。"
+    if not ai_available: return 10, "AI 未連線。"
     
     prompt = f"""
-    請扮演《神奇柑仔店》的紅子老闆娘，批改學生的問答題。
+    請扮演《神奇柑仔店》的紅子老闆娘批改問答題。
     【題目】：{question}
-    【學生回答】：{student_answer}
-    【評分標準】：滿分 20 分。
-    【回饋原則】：
-    1. 若回答錯誤，請用神秘的口吻引導他思考正確方向，**不要直接給答案**。
-    2. 若回答正確，請稱讚他很有眼光，是幸運的客人。
-    3. 語氣要符合角色設定（成熟、神秘、溫暖）。
-    
-    回傳格式：分數|評語 (繁體中文)
+    【回答】：{student_answer}
+    【評分標準】：滿分20分。依據：1.了解題意 2.內容正確 3.有獨特見解。
+    【回饋原則】：若錯請引導，若對請稱讚。**請用繁體中文回覆，嚴禁使用日文。**
+    格式：分數|評語
     """
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt, safety_settings=safety_settings)
         text = response.text.strip()
+        
         if "|" in text:
             s, f = text.split("|", 1)
-            return int(float(s)), f
-        return 10, text
-    except:
-        return 10, "評分系統忙碌中，請稍後再試。"
+            # --- 強化：確保分數是數字 ---
+            if s.strip().isdigit():
+                return int(s.strip()), f.strip()
+        
+        # --- 容錯處理：如果格式不符或 AI 忙碌，給予部分分數 ---
+        return 10, "格式錯誤，但已獲得部分分數。"
+    except Exception:
+        # 如果連線失敗，回傳預設分數
+        return 10, "評分系統連線失敗，請重試。"
 
-def call_ai_final_comment(total, history_summary, story_text):
-    if not ai_available: return "測驗完成！繼續加油！"
+def call_ai_final_comment(total, level, story_text):
+    if not ai_available: return "測驗完成！"
+    
+    # 根據圖片中的風格進行優化：溫暖、鼓勵、具體
     prompt = f"""
-    學生在測驗中獲得 {total} 分。
-    請用《神奇柑仔店》老闆娘紅子的口吻，給他一句結語。
-    例如：「你今天的運勢不錯...」或「看來你還需要更多修練...」。
+    你是一位溫暖的老師。學生在閱讀測驗中獲得了 {total} 分 (滿分100)。
+    請寫一段繁體中文的評語，肯定學生的努力和實力。**嚴禁使用日文。**
     """
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         return model.generate_content(prompt, safety_settings=safety_settings).text.strip()
     except:
-        return "測驗完成！"
+        return "測驗結束，你做得很好！繼續加油！"
 
 # ==========================================
 # 3. 介面與流程
@@ -167,7 +192,6 @@ def load_story():
 st.set_page_config(page_title="神奇柑仔店 - AI 閱讀認證", page_icon="🐱")
 st.title("🐱 神奇柑仔店 - AI 閱讀挑戰")
 
-# --- 側邊欄 ---
 with st.sidebar:
     st.header("系統狀態")
     if ai_available: st.success(ai_status_msg)
@@ -209,9 +233,8 @@ elif st.session_state.step == 'confirm':
     st.write("準備好接受紅子老闆娘的考驗了嗎？")
     
     if st.button("🚀 進入錢天堂 (開始測驗)"):
-        # 動畫區
         ani_box = st.empty()
-        ani_box.image("https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif", width=300)
+        ani_box.image("https://media.giphy.com/media/l1KtXm1qo1d3f5FzW/giphy.gif", caption="正全速前往錢天堂...", width=300)
         
         with st.status("🧙‍♀️ 正在準備考卷...", expanded=True) as status:
             st.write("📖 閱讀故事中...")
@@ -225,19 +248,20 @@ elif st.session_state.step == 'confirm':
         
         ani_box.empty()
 
-        # 題目處理
         st.session_state.quiz_data = quiz
         st.session_state.all_questions = []
-        if "mc_questions" in quiz:
-            for q in quiz['mc_questions']: st.session_state.all_questions.append({'type': 'MC', 'data': q})
+        
+        # 依照規則：先 QA 再 MC
         if "qa_questions" in quiz:
             for q in quiz['qa_questions']: st.session_state.all_questions.append({'type': 'QA', 'data': q})
+        if "mc_questions" in quiz:
+            for q in quiz['mc_questions']: st.session_state.all_questions.append({'type': 'MC', 'data': q})
             
         if len(st.session_state.all_questions) > 0:
             st.session_state.step = 'testing'
             st.rerun()
         else:
-            st.error("出題失敗，請重試。")
+            st.error("出題失敗，請重試或檢查側邊欄錯誤訊息。")
 
 elif st.session_state.step == 'testing':
     total_q = len(st.session_state.all_questions)
@@ -247,7 +271,9 @@ elif st.session_state.step == 'testing':
     st.progress((current_idx) / total_q)
     st.caption(f"進度：{current_idx + 1} / {total_q}")
     
-    st.markdown(f"### 📝 第 {current_idx + 1} 題")
+    q_type_title = "問答題" if q_data['type'] == 'QA' else "選擇題"
+    st.markdown(f"### 📝 第 {current_idx + 1} 題 ({q_type_title})")
+    
     question_text = q_data['data']['question']
     st.info(question_text)
     
@@ -293,27 +319,35 @@ elif st.session_state.step == 'testing':
 
 elif st.session_state.step == 'calculating':
     ani_box = st.empty()
-    ani_box.image("https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif", caption="招財貓正在仔細批改...", width=300)
+    ani_box.image("https://media.giphy.com/media/l1KtXm1qo1d3f5FzW/giphy.gif", caption="招財貓正在仔細批改...", width=300)
     
     with st.status("👩‍🏫 紅子老師正在看你的答案...", expanded=True) as status:
         total = 0
         story = load_story()
         
+        mc_score_per_q = 0
+        if st.session_state.level == "A": mc_score_per_q = 8
+        elif st.session_state.level == "B": mc_score_per_q = 6
+        else: mc_score_per_q = 4
+
         for ans in st.session_state.answers:
             if ans['type'] == 'MC':
-                correct_opt_char = str(ans['data']['answer'])[0]
-                user_opt_char = str(ans['user_response'])[0]
+                try:
+                    correct_opt_char = str(ans['data']['answer'])[0]
+                    user_opt_char = str(ans['user_response'])[0]
+                except:
+                    correct_opt_char = "X"
+                    user_opt_char = "Y"
                 
                 is_correct = (correct_opt_char == user_opt_char)
                 pts = 0
                 feedback = ""
                 
                 if is_correct:
-                    pts = 8 if st.session_state.level == "A" else 5
+                    pts = mc_score_per_q
                     feedback = "✅ 答對了！紅子老闆娘覺得你很有眼光！"
                 else:
                     st.write(f"正在分析選擇題錯誤：{ans['question'][:10]}...")
-                    # 呼叫 AI 生成提示
                     feedback = call_ai_generate_hint(
                         ans['question'], 
                         ans['user_response'], 
@@ -339,7 +373,7 @@ elif st.session_state.step == 'calculating':
     
     ani_box.empty()
     
-    cmt = call_ai_final_comment(total, "", story)
+    cmt = call_ai_final_comment(total, st.session_state.level, story)
     
     rec = {
         "班級": student_class, 
@@ -358,8 +392,9 @@ elif st.session_state.step == 'finished':
     rec = st.session_state.final_rec
     st.balloons()
     
-    st.markdown(f"# 🎉 挑戰完成！總分：{rec['總分']} 分")
-    st.info(f"👩‍🏫 紅子老師的話：{rec['評語']}")
+    score_color = "green" if rec['總分'] >= 60 else "red"
+    st.markdown(f"# 🎉 測驗完成！總分：:{score_color}[{rec['總分']} 分]")
+    st.info(f"AI 老師評語：{rec['評語']}")
     
     st.divider()
     
@@ -367,8 +402,9 @@ elif st.session_state.step == 'finished':
     st.write("來看看紅子老師對每一題的建議吧！")
     
     for i, ans in enumerate(st.session_state.answers):
-        score_color = "green" if ans['score'] > 0 else "red"
-        title_text = f"第 {i+1} 題：{ans['question']} (:{score_color}[{ans['score']}分])"
+        s_color = "green" if ans['score'] > 0 else "red"
+        q_type = "(問答)" if ans['type'] == 'QA' else "(選擇)"
+        title_text = f"第 {i+1} 題 {q_type}：{ans['question']} (:{s_color}[{ans['score']}分])"
         
         with st.expander(title_text, expanded=True):
             st.markdown(f"**你的回答：** {ans['user_response']}")
