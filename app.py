@@ -5,6 +5,7 @@ import os
 import json
 import time
 import re
+import google.generativeai as genai
 
 # ==========================================
 # 1. AI 設定與診斷區
@@ -13,7 +14,6 @@ ai_status_msg = ""
 ai_available = False
 
 try:
-    import google.generativeai as genai
     if "GEMINI_API_KEY" in st.secrets:
         api_key = st.secrets["GEMINI_API_KEY"]
         genai.configure(api_key=api_key)
@@ -132,23 +132,28 @@ def call_ai_generate_hint(question, wrong_answer, correct_option_index, options,
         return "再仔細想想故事細節喔！"
 
 def call_ai_grade_qa(question, student_answer, story_text):
-    if not ai_available: return 10, "AI 未連線。"
+    # 修正點 1: 連線失敗直接給 0 分，不給容錯分 10
+    if not ai_available: return 0, "AI 未連線，本次作答不計分（0分）。請重試。"
     
+    # 修正點 2: 優化 Prompt，指示 AI 嚴格評分無效回答
     prompt = f"""
     請扮演《神奇柑仔店》的紅子老闆娘批改問答題。
     【題目】：{question}
     【回答】：{student_answer}
     
     【評分標準】：滿分20分。
-    1. **主旨正確性 (10分)**：是否有明確說出紅子零食背後的道理（例如：不可貪婪、要努力、珍惜擁有）。
+    1. **主旨正確性 (10分)**：是否有明確說出紅子零食背後的道理。
     2. **案例完整性 (10分)**：題目要求「舉至少兩個故事的例子來說明」。如果只舉了 1 個例子，扣 5 分；如果沒有舉例，扣 10 分。
     
+    【**關鍵規定**】：
+    * **如果回答是空白、無意義（例如：「我忘了」、「不知道」）或與題目無關，分數必須為 0 分，並在評語中指出「請認真作答」。**
+    
     【回饋原則】：
-    1. **請先判斷內容是否完整。** 如果回答正確但缺少例子，請明確指出「道理正確，但請補充故事例子」。
-    2. **若內容錯誤**，請給予引導性的建議。
-    3. **全程使用繁體中文，嚴禁使用日文。**
-    4. 格式：分數|評語
+    1. 請根據內容完整性給分。
+    2. 全程使用繁體中文，嚴禁使用日文。
+    3. 格式：分數|評語
     """
+    
     try:
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt, safety_settings=safety_settings)
@@ -158,13 +163,16 @@ def call_ai_grade_qa(question, student_answer, story_text):
             s, f = text.split("|", 1)
             # 確保分數是數字
             if s.strip().isdigit():
-                return int(s.strip()), f.strip()
+                score = int(s.strip())
+                # 確保分數不會超過滿分 (20分)
+                if score > 20: score = 20
+                return score, f.strip()
         
-        # 容錯處理：如果格式不符或 AI 忙碌，給予部分分數
-        return 10, "格式不符，但已獲得部分分數。"
+        # 修正點 3: 如果 AI 格式錯誤，則直接給 0 分，不再給 10 分
+        return 0, "回饋格式錯誤，本次作答不計分（0分）。請重試。"
     except Exception:
-        # 如果連線失敗，回傳預設分數
-        return 10, "評分系統連線失敗，請重試。"
+        # 如果連線失敗，回傳 0 分
+        return 0, "評分系統連線失敗，本次作答不計分（0分）。請重試。"
 
 def call_ai_final_comment(total, level, story_text):
     if not ai_available: return "測驗完成！"
@@ -252,7 +260,8 @@ elif st.session_state.step == 'confirm':
     
     if st.button("🚀 進入錢天堂 (開始測驗)"):
         ani_box = st.empty()
-        ani_box.image("https://media.giphy.com/media/l1KtXm1qo1d3f5FzW/giphy.gif", caption="正全速前往錢天堂...", width=300)
+        # 替換為新的 GIF 連結 (思考/魔術師主題)
+        ani_box.image("https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExZTVrNWx1aGJzMGJ6OHo0OGd3MGswMXZ5azFhN25tMTRmMGVpbmZscSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/l0HFkA6omUOhqE2Jk/giphy.gif", caption="紅子老師正在準備考卷...", width=300)
         
         with st.status("🧙‍♀️ 正在準備考卷...", expanded=True) as status:
             st.write("📖 閱讀故事中...")
@@ -336,7 +345,8 @@ elif st.session_state.step == 'testing':
 
 elif st.session_state.step == 'calculating':
     ani_box = st.empty()
-    ani_box.image("https://media.giphy.com/media/l1KtXm1qo1d3f5FzW/giphy.gif", caption="招財貓正在仔細批改...", width=300)
+    # 替換為新的 GIF 連結 (招財貓主題)
+    ani_box.image("https://media.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3Zmb2N3NG53NTk4cTFnZGd6cTM0a3lmbGJvcXBhN3Foc2E2eTM1ZiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/83Xw14b98vE4R2lX3L/giphy.gif", caption="招財貓正在仔細批改...", width=300)
     
     with st.status("👩‍🏫 紅子老師正在看你的答案...", expanded=True) as status:
         total = 0
@@ -431,4 +441,3 @@ elif st.session_state.step == 'finished':
     if st.button("🔄 重新挑戰"):
         for k in list(st.session_state.keys()): del st.session_state[k]
         st.rerun()
-
