@@ -3,6 +3,7 @@ import pandas as pd
 import datetime
 import os
 import json
+import time  # 用於動畫延遲
 
 # ==========================================
 # 1. AI 設定與診斷區
@@ -78,7 +79,7 @@ def call_ai_generate_quiz(level, text_content):
     請確保選擇題有 4 個選項。
     """
     try:
-        # 【重要修改】使用診斷出來的 gemini-2.5-flash 模型
+        # 使用診斷確認可用的 gemini-2.5-flash
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(prompt, safety_settings=safety_settings)
         
@@ -86,14 +87,13 @@ def call_ai_generate_quiz(level, text_content):
         clean_text = response.text.replace("```json", "").replace("```", "").strip()
         return json.loads(clean_text)
     except Exception as e:
-        # 將詳細錯誤顯示在側邊欄，方便除錯
         st.sidebar.error(f"AI 出題過程發生錯誤: {e}")
         return get_mock_quiz()
 
 def call_ai_grade_qa(question, student_answer, story_text):
     if not ai_available: return 15, "（模擬評分）AI 未連線。"
     try:
-        # 【重要修改】使用 gemini-2.5-flash
+        # 使用 gemini-2.5-flash
         model = genai.GenerativeModel('gemini-2.5-flash')
         response = model.generate_content(
             f"請評分(滿分20)：題目：{question}，回答：{student_answer}。回傳格式：分數|評語",
@@ -110,7 +110,7 @@ def call_ai_grade_qa(question, student_answer, story_text):
 def call_ai_final_comment(total, qa_feedback, story_text):
     if not ai_available: return "模擬總評：完成！"
     try:
-        # 【重要修改】使用 gemini-2.5-flash
+        # 使用 gemini-2.5-flash
         model = genai.GenerativeModel('gemini-2.5-flash')
         return model.generate_content(f"給予總分 {total} 分的學生一句繁體中文鼓勵。", safety_settings=safety_settings).text.strip()
     except:
@@ -176,34 +176,64 @@ if st.session_state.step == 'login':
         st.session_state.level = "C"; st.session_state.step = 'confirm'; st.rerun()
 
 elif st.session_state.step == 'confirm':
-    if st.button("開始測驗"):
-        with st.spinner("AI 正在閱讀故事並出題中...(約需 5-10 秒)"):
+    st.markdown("### 準備好了嗎？")
+    st.write(f"目前的挑戰等級：**{st.session_state.level}**")
+    
+    # 這裡就是我們新加入的動畫按鈕區
+    if st.button("🚀 進入錢天堂 (開始測驗)"):
+        
+        # 1. 顯示貓咪動畫
+        animation_placeholder = st.empty()
+        # 這裡用的是網路上的動圖，你也可以換成其他 GIF 連結
+        animation_placeholder.image(
+            "https://media.giphy.com/media/JIX9t2j0ZTN9S/giphy.gif", 
+            caption="招財貓正在努力製作你的考卷...", 
+            width=300
+        )
+        
+        # 2. 顯示進度條
+        with st.status("🧙‍♀️ 紅子老闆娘收到訂單了...", expanded=True) as status:
+            st.write("📖 正在閱讀《神奇柑仔店》的故事內容...")
+            time.sleep(1) # 停頓一下更有感
+            
+            st.write("😼 召喚金色招財貓製作題目...")
+            time.sleep(1)
+            
+            st.write(f"🔥 正在根據等級 {st.session_state.level} 調整難度...")
+            
+            # 呼叫 AI (這時候貓咪動畫會一直在上面動)
             story = load_story()
-            # 呼叫 AI 出題
             quiz = call_ai_generate_quiz(st.session_state.level, story)
             
-            st.session_state.quiz_data = quiz
-            st.session_state.all_questions = []
+            st.write("✨ 題目製作完成！")
+            status.update(label="✅ 準備就緒！", state="complete", expanded=False)
+            time.sleep(0.5)
             
-            # 整理題目順序
-            if "qa_questions" in quiz:
-                for q in quiz['qa_questions']: st.session_state.all_questions.append({'type': 'QA', 'data': q})
-            if "mc_questions" in quiz:
-                for q in quiz['mc_questions']: st.session_state.all_questions.append({'type': 'MC', 'data': q})
-            
-            # 初始化對話紀錄
-            st.session_state.history = [{"role": "bot", "content": "你好！我是 AI 老師，測驗開始囉！"}]
-            
-            # 顯示第一題
-            if len(st.session_state.all_questions) > 0:
-                q1 = st.session_state.all_questions[0]
-                q_text = q1['data']['question']
-                if q1['type'] == 'MC': q_text += "\n" + "\n".join(q1['data']['options'])
-                st.session_state.history.append({"role": "bot", "content": f"【第一題】{q_text}"})
-                st.session_state.step = 'testing'
-                st.rerun()
-            else:
-                st.error("錯誤：沒有產生任何題目，請檢查側邊欄的錯誤訊息，或按重新整理再試一次。")
+        # 3. 清除動畫，準備顯示題目
+        animation_placeholder.empty()
+
+        st.session_state.quiz_data = quiz
+        st.session_state.all_questions = []
+        
+        # 整理題目
+        if "qa_questions" in quiz:
+            for q in quiz['qa_questions']: st.session_state.all_questions.append({'type': 'QA', 'data': q})
+        if "mc_questions" in quiz:
+            for q in quiz['mc_questions']: st.session_state.all_questions.append({'type': 'MC', 'data': q})
+        
+        # 開場白
+        st.session_state.history = [{"role": "bot", "content": "歡迎光臨錢天堂！我是紅子。這是我為你特別製作的『運氣測驗』，請開始作答吧！"}]
+        
+        # 進入答題介面
+        if len(st.session_state.all_questions) > 0:
+            q1 = st.session_state.all_questions[0]
+            q_text = q1['data']['question']
+            if q1['type'] == 'MC': q_text += "\n" + "\n".join(q1['data']['options'])
+            st.session_state.history.append({"role": "bot", "content": f"【第一題】{q_text}"})
+            st.session_state.step = 'testing'
+            st.rerun()
+        else:
+            st.error("錯誤：沒有產生題目，請檢查側邊欄錯誤訊息。")
 
 elif st.session_state.step == 'testing':
     # 顯示歷史對話
@@ -215,12 +245,12 @@ elif st.session_state.step == 'testing':
         q = st.session_state.all_questions[idx]
         user_input = st.chat_input("請輸入答案...")
         if user_input:
-            # 紀錄使用者回答
+            # 紀錄回答
             with st.chat_message("user"): st.write(user_input)
             st.session_state.history.append({"role": "user", "content": user_input})
             st.session_state.answers.append({"type": q['type'], "user_response": user_input, "question_data": q['data']})
             
-            # 準備下一題
+            # 下一題
             next_idx = idx + 1
             st.session_state.current_q_index = next_idx
             if next_idx < len(st.session_state.all_questions):
@@ -230,7 +260,6 @@ elif st.session_state.step == 'testing':
                 st.session_state.history.append({"role": "bot", "content": f"收到！下一題：\n{nq_text}"})
                 st.rerun()
             else:
-                # 題目做完了，進入計分
                 st.session_state.step = 'calculating'; st.rerun()
 
 elif st.session_state.step == 'calculating':
@@ -240,12 +269,12 @@ elif st.session_state.step == 'calculating':
         
         for ans in st.session_state.answers:
             if ans['type'] == 'MC':
-                # 選擇題評分 (檢查第一個字元)
+                # 選擇題評分
                 if str(ans['user_response'])[0] == str(ans['question_data']['answer'])[0]:
                     pts = 8 if st.session_state.level == "A" else (6 if st.session_state.level == "B" else 4)
                     total += pts; mc += pts
             else:
-                # 問答題呼叫 AI 評分
+                # 問答題評分
                 s, f = call_ai_grade_qa(ans['question_data']['question'], ans['user_response'], story)
                 total += s; qa += s
         
