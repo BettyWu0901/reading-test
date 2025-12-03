@@ -70,7 +70,7 @@ def call_ai_generate_quiz(level, text_content):
     請確保選擇題有 4 個選項。
     """
     try:
-        model = genai.GenerativeModel('gemini-pro')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
         clean_text = response.text.replace("```json", "").replace("```", "").strip()
         return json.loads(clean_text)
@@ -81,7 +81,7 @@ def call_ai_generate_quiz(level, text_content):
 def call_ai_grade_qa(question, student_answer, story_text):
     if not ai_available: return 15, "（模擬評分）AI 未連線。"
     try:
-        model = genai.GenerativeModel('gemini-pro')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(f"請評分(滿分20)：題目：{question}，回答：{student_answer}。回傳格式：分數|評語")
         text = response.text.strip()
         if "|" in text:
@@ -94,7 +94,7 @@ def call_ai_grade_qa(question, student_answer, story_text):
 def call_ai_final_comment(total, qa_feedback, story_text):
     if not ai_available: return "模擬總評：完成！"
     try:
-        model = genai.GenerativeModel('gemini-pro')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         return model.generate_content(f"給予總分 {total} 分的學生一句繁體中文鼓勵。").text.strip()
     except:
         return "測驗完成！繼續加油！"
@@ -230,4 +230,5 @@ elif st.session_state.step == 'finished':
     if st.button("重新開始"):
         for k in list(st.session_state.keys()): del st.session_state[k]
         st.rerun()
+
 
